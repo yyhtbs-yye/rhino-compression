@@ -1,0 +1,40 @@
+# Ignore result and dataset folders
+chpt_bkups/
+data/
+work_dirs/
+work_dirs
+vision_diffuser.egg-info/
+__pycache__/
+*.pyc
+data
+# Ignore all model checkpoints
+*.ckpt
+*.pth
+*.pt
+*.pkl
+*.onnx
+*.h5
+*.tar
+*.zip
+*.tar.gz
+*.tar.bz2
+*.tar.xz
+*.tar.lzma
+*.tar.lz
+*.tar.zst
+*.tar.lz4
+*.tar.sz
+# Ignore all image formats
+*.png
+*.jpg
+*.jpeg
+*.bmp
+*.gif
+*.tiff
+*.webp
+*.out
+*.json
+rhcore/
+rhtrain/
+rhcore
+rhtrain

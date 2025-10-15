@@ -1,0 +1,16 @@
+Metadata-Version: 2.4
+Name: rhino-compression
+Version: 0.1.0
+Summary: Image/Video AI Tools
+Author: Yuhang Ye
+Author-email: yyhtbs0@gmail.com
+Requires-Python: >=3.11
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Provides-Extra: rhcompression
+Dynamic: author
+Dynamic: author-email
+Dynamic: license-file
+Dynamic: requires-python
+
+# 🦏 Rhino-Compression

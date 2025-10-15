@@ -1,0 +1,9 @@
+LICENSE
+README.md
+pyproject.toml
+setup.py
+rhino_compression.egg-info/PKG-INFO
+rhino_compression.egg-info/SOURCES.txt
+rhino_compression.egg-info/dependency_links.txt
+rhino_compression.egg-info/requires.txt
+rhino_compression.egg-info/top_level.txt

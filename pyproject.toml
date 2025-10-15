@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rhino-compression"
+version = "0.1.0"
+description = "Image/Video AI Tools"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+]
+
+[project.optional-dependencies]
+rhcompression = [
+    # rhino dependency
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["rhcompression"]  
