@@ -119,7 +119,7 @@ class BaseVectorQuantizationBoat(BaseBoat):
             "used_codes": used_codes.detach(),
         }
 
-    def validation_step(self, batch, batch_idx):
+    def validation_step(self, batch, batch_idx, epoch):
         batch = move_to_device(batch, self.device)
         gt = batch["gt"]
         vq = self.models['vector_quantizer']
