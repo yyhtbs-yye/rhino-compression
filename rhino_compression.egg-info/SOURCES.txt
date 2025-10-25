@@ -2,6 +2,7 @@ LICENSE
 README.md
 pyproject.toml
 setup.py
+rhcompression/__init__.py
 rhino_compression.egg-info/PKG-INFO
 rhino_compression.egg-info/SOURCES.txt
 rhino_compression.egg-info/dependency_links.txt

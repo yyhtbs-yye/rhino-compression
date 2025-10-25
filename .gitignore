@@ -34,7 +34,6 @@ data
 *.webp
 *.out
 *.json
-rhcore/
-rhtrain/
 rhcore
 rhtrain
+rhadversarial
