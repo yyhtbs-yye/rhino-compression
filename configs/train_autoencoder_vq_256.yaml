@@ -121,7 +121,7 @@ callbacks:
       top_k: 5
 
 _vars:
-  devices: [0, 5, 6, 7]
+  devices: [0, 5]
   max_epochs: 200
 
   train_batch_size: 8
