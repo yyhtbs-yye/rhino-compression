@@ -8,8 +8,8 @@ References:
 import torch
 import torch.nn as nn
 
-from rhcompression.nn.var_vqvae.ae_blocks import Decoder, Encoder
-from rhcompression.nn.var_vqvae.vq import MultiScaleVectorQuantizer
+from rhcompression.nn.vqvae.ae_blocks import Decoder, Encoder
+from rhcompression.nn.var_vqvae.msvq import MultiScaleVectorQuantizer
 
 class VARVQVAE(nn.Module):
     def __init__(self,
@@ -24,7 +24,7 @@ class VARVQVAE(nn.Module):
                  residual_ratio=0.5,            # (was: quant_resi) phi(x)=a*conv(x)+(1-a)*x
                  share_residual=4,              # (was: share_quant_resi) partially shared phi
                  default_qresi_counts=0,        # if 0, set to len(patch_nums)
-                 patch_nums=(1, 2, 4, 8, 16),   # number of patches at each scale
+                 patch_nums=(1, 2, 3, 4, 5, 6, 8, 10, 13, 16),   # number of patches at each scale
     ):
         super().__init__()
         self.vocab_size = vocab_size
@@ -36,7 +36,7 @@ class VARVQVAE(nn.Module):
             base_channels=base_channels,
             z_channels=embed_dim,
             in_channels=in_channels,
-            ch_mult=(1, 1, 2, 2, 4),
+            channel_scales=(1, 1, 2, 2, 4),
             num_res_blocks=2,
             using_sa=True,
             using_mid_sa=True,
@@ -44,7 +44,7 @@ class VARVQVAE(nn.Module):
         self.encoder = Encoder(double_z=False, **ddconfig)
         self.decoder = Decoder(**ddconfig)
 
-        self.downsample = 2 ** (len(ddconfig["ch_mult"]) - 1)
+        self.downsample = 2 ** (len(ddconfig["channel_scales"]) - 1)
 
         # Vector quantizer
         self.quantize = MultiScaleVectorQuantizer(
@@ -68,7 +68,6 @@ class VARVQVAE(nn.Module):
         x: torch.Tensor,
         *,
         ret_usages: bool = False,
-        return_dict: bool = False,
         ret_progressive: bool = False,
         ret_indices: bool = False,
         patch_nums=None,
@@ -77,11 +76,7 @@ class VARVQVAE(nn.Module):
         """
         Encode -> quantize (STE) -> decode.
 
-        Backward-compat:
-          return_dict=False  -> returns (img, usages, vq_loss)
-
         DDP/Trainer-friendly rich output:
-          return_dict=True   -> returns a dict with:
             - 'recon'   : reconstructed image (B,C,H,W)
             - 'z_pre'   : pre-quant features (B,D,h,w)   [a.k.a. encoder features after quant_conv]
             - 'z_quant' : quantized features (B,D,h,w)
@@ -100,10 +95,6 @@ class VARVQVAE(nn.Module):
         recon = self.decoder(self.post_quant_conv(z_quant))
         if clamp:
             recon = recon.clamp_(-1, 1)
-
-        if not return_dict:
-            # original (img, usages, vq_loss) API
-            return recon, usages, vq_loss
 
         out = {
             'recon': recon,

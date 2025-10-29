@@ -117,15 +117,15 @@ class MultiScaleVectorQuantizer(nn.Module):
             if si != S - 1:
                 h = F.interpolate(h, size=(H, W), mode='bicubic').contiguous()
 
-            h = self.quant_resi[si](h)
+            # h = self.quant_resi[si](h)
+            h = self.quant_resi[si / (S - 1)](h)
+
+            commit = F.mse_loss(h, resid.detach()) * self.beta   # encoder (commitment)
+            codebk = F.mse_loss(h.detach(), resid)               # codebook
+            mean_vq_loss = mean_vq_loss + (commit + codebk)
 
             recon = recon + h
             resid = resid - h
-
-            mean_vq_loss = mean_vq_loss + (
-                F.mse_loss(recon.detach(), x).mul(self.beta) +  # codebook loss
-                F.mse_loss(recon, x_ng)                         # commit loss
-            )
 
         mean_vq_loss = mean_vq_loss * (1.0 / S)
 

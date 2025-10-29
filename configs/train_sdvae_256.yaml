@@ -1,53 +1,63 @@
 _import: configs/train_base_data.yaml
 
 boat:
-  path: 'rhcompression.boats.var_vqvae_boat'                # <- update to your actual module path
-  name: 'VARVQVAEBoat'
+  path: 'rhcompression.boats.sdvae_boat'
+  name: 'SDVAEBoat'
 
-  # BaseGANBoat hyper-params
-  hyper_parameters:
-    concurrent: false
-    g_interval: 1
-    d_interval: 1
-    adversarial_weight: 0.1
-    lambda_latent: 0.01
+  lpips_fadein:
+    path: 'rhcore.crossovers.fadein'
+    name: 'SigmoidFadeIn'
+    params:
+      start_step: 3000
+      duration: 3000
+      step_size: 5
+      eps: 0.000001
+
+  adv_fadein:
+    path: 'rhcore.crossovers.fadein'
+    name: 'SigmoidFadeIn'
+    params:
+      start_step: 20000
+      duration: 20000
+      step_size: 10
+      eps: 0.000001
+
+  # BaseGANBoat hyperparams
+  hyperparameters:
+    lambda_image: 1.0
+    max_weight_lpips: 1.0
+    weight_adv: 0.5
+    start_adv: 20000
+    beta_kl: 0.000001
 
   models:
-    # Multi-scale VQ-VAE tokenizer
-    net:
-      path: 'rhcompression.nn.var_vqvae.var_vqvae'
-      name: 'VARVQVAE'
-      params: 
-        base_channels: 64
 
-    # Discriminator (use whichever exists in your zoo; example below keeps DCGAN-style)
+    net:
+      path: 'rhcompression.nn.model_zoo.autoencoder_kl'
+      name: 'AutoencoderKL'
+      params: 
+        ddconfig:
+          double_z: True
+          z_channels: 4
+          resolution: 256
+          in_channels: 3
+          out_ch: 3
+          ch: 128
+          ch_mult: [1, 2, 4, 4]    # num_down = len(ch_mult) - 1  → 3 downsamples ⇒ 8× downsampling
+          num_res_blocks: 2
+          attn_resolutions: []      # no self-attn in the VAE
+          dropout: 0.0
+        embed_dim: 4
+
     critic:
-      path: 'rhadversarial.nn.model_zoo.dcgan_discriminator'
-      name: 'DCGANDiscriminator'
+      path: 'rhadversarial.nn.model_zoo.patch_discriminator'
+      name: 'PatchDiscriminator'
       params:
-        input_scale: 256          # set to your training image size
-        output_scale: 4
-        out_channels: 1
-        spectral_norm_enabled: true
+        in_channels: 3
+        spectral_norm_enabled: True
 
   losses:
-    # --- GAN (hinge) ---
-    critic:
-      path: 'rhino.nn.losses.gan_losses'
-      name: 'HingeGANLoss'
-      params: {}
-      wrapper:
-        mpath: 'rhcore.nn.losses.wrappers.list_of_keys.ListOfKeys'
-        params:
-          keys: ["real", "fake"]  # BaseGANBoat passes {'real': ..., 'fake': ...}
-
-    # --- reconstruction / feature ---
     pixel_loss:
-      path: 'torch.nn'
-      name: 'MSELoss'
-      params: {}
-
-    latent_loss:
       path: 'torch.nn'
       name: 'MSELoss'
       params: {}
@@ -58,7 +68,19 @@ boat:
       params:
         net: 'vgg'
 
+    critic:
+      path: 'rhino.nn.losses.gan_losses'
+      name: 'HingeGANLoss'
+      params: {}
+      wrapper: # This wrapper is more complex, as it needs parameters
+        mpath: 'rhcore.nn.losses.wrappers.list_of_keys.ListOfKeys'
+        params:
+          keys: ["real", "fake"] # targets is x, preds is params
+
 optimization:
+
+  target_loss_key: 'total_loss'
+
   net:
     path: 'torch.optim'
     name: 'Adam'
@@ -67,7 +89,7 @@ optimization:
       betas: [0.0, 0.99]
       weight_decay: 0.0
     lr_scheduler: {}
-
+  
   critic:
     path: 'torch.optim'
     name: 'Adam'
@@ -128,12 +150,12 @@ callbacks:
       top_k: 5
 
 _vars:
-  devices: [0, 1, 2, 3]
+  devices: [0, 5, 6, 7]
   max_epochs: 200
 
-  train_batch_size: 64
-  valid_batch_size: 32
-  num_workers: 16
+  train_batch_size: 8
+  valid_batch_size: 16
+  num_workers: 8
 
   # point these to your datasets (normalized to [-1,1] in datamodule)
   train_folder_paths:
@@ -141,5 +163,5 @@ _vars:
   valid_folder_paths:
     gt: data/celeba/subsets/celeba_256
 
-  experiment_name: varvqvae_ffhq_256
+  experiment_name: sdvae_ffhq_256
   ema_start: 1000

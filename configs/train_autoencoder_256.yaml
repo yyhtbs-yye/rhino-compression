@@ -1,0 +1,126 @@
+_import: configs/train_base_data.yaml
+
+boat:
+  path: 'rhcompression.boats.autoencoder_boat'
+  name: 'AutoencoderBoat'
+
+  lpips_fadein:
+    path: 'rhcore.crossovers.fadein'
+    name: 'ExpWeightAnnealer'
+    params:
+      start_step: 30
+      base: 0.99
+      step_size: 5
+
+  # BaseGANBoat hyperparams
+  hyperparameters:
+    lambda_image: 1.0
+    max_w_lpips: 1.0
+
+  models:
+    net:
+      path: 'rhcompression.nn.model_zoo.autoencoder'
+      name: 'Autoencoder'
+      params: 
+        ddconfig:
+          double_z: False
+          z_channels: 4
+          resolution: 256
+          in_channels: 3
+          out_ch: 3
+          ch: 128
+          ch_mult: [1, 2, 4, 4]    # num_down = len(ch_mult) - 1  → 3 downsamples ⇒ 8× downsampling
+          num_res_blocks: 2
+          attn_resolutions: []      # no self-attn in the VAE
+          dropout: 0.0
+        embed_dim: 4
+
+  losses:
+    pixel_loss:
+      path: 'torch.nn'
+      name: 'MSELoss'
+      params: {}
+
+    lpips_loss:
+      path: 'lpips'
+      name: 'LPIPS'
+      params:
+        net: 'vgg'
+
+optimization:
+  target_loss_key: 'total_loss'
+  net:
+    path: 'torch.optim'
+    name: 'Adam'
+    params:
+      lr: 0.0001
+      betas: [0.0, 0.99]
+      weight_decay: 0.0
+    lr_scheduler: {}
+
+  use_ema:
+    ema_decay: 0.999
+    ema_start: $ema_start
+
+trainer:
+  devices: $devices
+  max_epochs: $max_epochs
+  val_check_epochs: 1
+  state_save_epochs: 1
+  fup_by_key: # Setup find unused parameters, this is particular useful for DDP. 
+    net: True
+
+visualization:
+  save_images: true
+  first_batch_only: true
+  wnb: [0.5, 0.5]
+  num_vis_samples: 4
+
+validation:
+  target_metric_name: psnr
+  metrics:
+    psnr:
+      path: 'torchmetrics.image'
+      name: 'PeakSignalNoiseRatio'
+      wrapper: 'rhcore.metrics.wrappers.dict_2_params.Dict2ListParams'
+      params:
+        data_range: 2.0
+    ssim:
+      path: 'torchmetrics.image'
+      name: 'StructuralSimilarityIndexMeasure'
+      wrapper: 'rhcore.metrics.wrappers.dict_2_params.Dict2ListParams'
+      params: {}
+      
+logging:
+  root_dir: 'work_dirs'
+  name: $experiment_name
+  loggers:
+    tensorboard:
+      path: 'trainer.loggers.tensorboard'
+      name: 'TensorBoardLogger'
+      params:
+        log_dir: 'work_dirs'
+        name: $experiment_name
+
+callbacks:
+  - path: trainer.callbacks.state_cleaner
+    name: KeepTopKStateCallback
+    params:
+      top_k: 5
+
+_vars:
+  devices: [1, 2, 3, 4]
+  max_epochs: 200
+
+  train_batch_size: 8
+  valid_batch_size: 16
+  num_workers: 8
+
+  # point these to your datasets (normalized to [-1,1] in datamodule)
+  train_folder_paths:
+    gt: data/ffhq/ffhq_imgs/ffhq_256
+  valid_folder_paths:
+    gt: data/celeba/subsets/celeba_256
+
+  experiment_name: autoencoder_ffhq_256
+  ema_start: 1000
