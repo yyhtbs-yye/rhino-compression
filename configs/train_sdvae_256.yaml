@@ -25,8 +25,8 @@ boat:
   # BaseGANBoat hyperparams
   hyperparameters:
     lambda_image: 1.0
-    max_weight_lpips: 1.0
-    weight_adv: 0.5
+    max_weight_lpips: 0.5
+    weight_adv: 0.02
     start_adv: 20000
     beta_kl: 0.000001
 

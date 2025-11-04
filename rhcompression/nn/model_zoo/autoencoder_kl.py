@@ -40,12 +40,12 @@ class AutoencoderKL(nn.Module):
             posterior = self.encode(x)
             z = posterior.sample()
             x_hat = self.decode(z)
-            return x_hat, posterior
+            return x_hat, z, posterior
         elif mode == 'full' and sample_method == 'mode':
             posterior = self.encode(x)
             z = posterior.mode()
             x_hat = self.decode(z)
-            return x_hat, posterior
+            return x_hat, z, posterior
         elif mode == 'decode':
             return self.decode(x)
         else:

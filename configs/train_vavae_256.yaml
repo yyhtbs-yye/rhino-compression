@@ -1,21 +1,56 @@
 _import: configs/train_base_data.yaml
 
 boat:
-  path: 'rhcompression.boats.autoencoder_vq_boat'
-  name: 'AutoencoderVQBoat'
+  path: 'rhcompression.boats.vavae_boat'
+  name: 'VAVAEBoat'
+
+  lpips_fadein:
+    path: 'rhcore.crossovers.fadein'
+    name: 'SigmoidFadeIn'
+    params:
+      start_step: 3000
+      duration: 3000
+      step_size: 5
+      eps: 0.000001
+
+  adv_fadein:
+    path: 'rhcore.crossovers.fadein'
+    name: 'SigmoidFadeIn'
+    params:
+      start_step: 20000
+      duration: 20000
+      step_size: 10
+      eps: 0.000001
 
   # BaseGANBoat hyperparams
   hyperparameters:
     lambda_image: 1.0
-    max_weight_lpips: 1.0
+    beta_kl: 0.000001
+    max_weight_lpips: 0.5
+    weight_adv: 0.02
+    start_adv: 20000
+    vf_weight: 0.5
+    vf_margin_cos: 0.1
+    vf_margin_dms: 0.05
+    vf_eps: 0.00000001
+
+  pretrained:
+    vf:
+      path: 'rhcompression.wrappers.dinov3_wrapper'
+      name: 'Dinov3Wrapper'
+      params:
+        model_name: 'facebook/dinov3-vitb16-pretrain-lvd1689m'
+        input_range: [-1.0, 1.0]
+        enable_cache: true
+        mem_cache_in_gb: 16
 
   models:
     net:
-      path: 'rhcompression.nn.model_zoo.autoencoder_vq'
-      name: 'AutoencoderVQ'
+      path: 'rhcompression.nn.model_zoo.autoencoder_kl'
+      name: 'AutoencoderKL'
       params: 
         ddconfig:
-          double_z: false
+          double_z: True
           z_channels: 4
           resolution: 256
           in_channels: 3
@@ -25,18 +60,23 @@ boat:
           num_res_blocks: 2
           attn_resolutions: []      # no self-attn in the VAE
           dropout: 0.0
-        
-        vqconfig:
-          beta: 0.25
-          ema_decay: 0.99
-          ema_eps: 0.00001
-          kmeans_init: True
-          kmeans_iters: 10
-          kmeans_subsample: 131072
-          kmeans_pp: False
-
         embed_dim: 4
-        vocab_size: 4096
+    
+    proj:
+      path: 'torch.nn'
+      name: 'Conv2d'
+      params:
+        in_channels: 4      # sdvae latent channels
+        out_channels: 768   # dinov3-vitb16 feature dim
+        kernel_size: 1
+        bias: True
+
+    critic:
+      path: 'rhadversarial.nn.model_zoo.patch_discriminator'
+      name: 'PatchDiscriminator'
+      params:
+        in_channels: 3
+        spectral_norm_enabled: True
 
   losses:
     pixel_loss:
@@ -50,9 +90,28 @@ boat:
       params:
         net: 'vgg'
 
+    critic:
+      path: 'rhino.nn.losses.gan_losses'
+      name: 'HingeGANLoss'
+      params: {}
+      wrapper: # This wrapper is more complex, as it needs parameters
+        mpath: 'rhcore.nn.losses.wrappers.list_of_keys.ListOfKeys'
+        params:
+          keys: ["real", "fake"] # targets is x, preds is params
+
 optimization:
   target_loss_key: 'total_loss'
   net:
+    path: 'torch.optim'
+    name: 'Adam'
+    bind_to: ['net', 'proj']
+    params:
+      lr: 0.0002
+      betas: [0.0, 0.99]
+      weight_decay: 0.0
+    lr_scheduler: {}
+
+  critic:
     path: 'torch.optim'
     name: 'Adam'
     params:
@@ -112,7 +171,7 @@ callbacks:
       top_k: 5
 
 _vars:
-  devices: [0, 5]
+  devices: [5]
   max_epochs: 200
 
   train_batch_size: 16
@@ -125,5 +184,5 @@ _vars:
   valid_folder_paths:
     gt: data/celeba/subsets/celeba_256
 
-  experiment_name: autoencoder_vq_ffhq_256
+  experiment_name: vavae_ffhq_256
   ema_start: 1000

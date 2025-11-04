@@ -11,9 +11,10 @@ class SDVAEBoat(BaseGANBoat): # Stable Diffusion Variational Autoencoder Boat
         self.lambda_image       = float(hps.get('lambda_image', 1.0))
         self.beta_kl            = float(hps.get('beta_kl', 1e-6))
         self.max_weight_lpips   = float(hps.get('max_weight_lpips', 1.0))
-        self.max_weight_adv         = float(hps.get('max_weight_adv', 1.0))
+        self.max_weight_adv     = float(hps.get('max_weight_adv', 1.0))
         self.use_mode_eval      = bool(hps.get('use_mean_at_eval', True))
         self.start_adv          = int(hps.get('start_adv', 20_000))
+
         # Annealers are optional; default to constant schedules
         self.lpips_fadein = build_module(config['boat']['lpips_fadein']) if 'lpips_fadein' in config['boat'] else (lambda *_: 0.0)
         self.adv_fadein = build_module(config['boat']['adv_fadein']) if 'adv_fadein' in config['boat'] else (lambda *_: 0.0)
@@ -21,7 +22,7 @@ class SDVAEBoat(BaseGANBoat): # Stable Diffusion Variational Autoencoder Boat
     # ---------- Inference ----------
     def predict(self, x):
         sm = 'mode' if self.use_mode_eval else 'random'
-        x_hat, _ = self.models['net'](x, mode='full', sample_method=sm)
+        x_hat, _, _ = self.models['net'](x, mode='full', sample_method=sm)
         return torch.clamp(x_hat, -1.0, 1.0)
 
     # -------- D step wiring (real vs recon) --------
@@ -33,7 +34,7 @@ class SDVAEBoat(BaseGANBoat): # Stable Diffusion Variational Autoencoder Boat
             x = batch['gt']
 
             with torch.no_grad():
-                x_hat, _ = self.models['net'](x, mode='full', sample_method='mode')
+                x_hat, _, _ = self.models['net'](x, mode='full', sample_method='mode')
 
             d_real = self.models['critic'](x)
             d_fake = self.models['critic'](x_hat.detach())
@@ -42,7 +43,7 @@ class SDVAEBoat(BaseGANBoat): # Stable Diffusion Variational Autoencoder Boat
 
             d_loss = self.losses['critic'](train_out)
 
-            w_adv = self.max_weight_adv * (1.0 - float(self.adv_fadein(self.global_step())))
+            w_adv = self.max_weight_adv * float(self.adv_fadein(self.global_step()))
 
             return {
                 'd_loss': d_loss * w_adv,
@@ -61,10 +62,11 @@ class SDVAEBoat(BaseGANBoat): # Stable Diffusion Variational Autoencoder Boat
         
         x = batch['gt']
         
-        x_hat, q = self.models['net'](x, mode='full', sample_method='random')
+        x_hat, _, q = self.models['net'](x, mode='full', sample_method='random')
 
         l_img = self.losses['pixel_loss'](x_hat, x)
 
+        w_adv = self.max_weight_adv * float(self.adv_fadein(self.global_step()))
         if self.global_step() >= self.start_adv:
             d_fake_for_g = self.models['critic'](x_hat)
             train_out = {'real': d_fake_for_g, 'fake': None, **batch}
@@ -73,8 +75,6 @@ class SDVAEBoat(BaseGANBoat): # Stable Diffusion Variational Autoencoder Boat
             l_adv = torch.zeros((), device=self.device)
 
         w_lpips = self.max_weight_lpips * float(self.lpips_fadein(self.global_step()))
-        w_adv = self.max_weight_adv * float(self.adv_fadein(self.global_step()))
-
         l_lpips = (self.losses['lpips_loss'](x_hat, x).mean()
                    if ('lpips_loss' in self.losses and w_lpips > 1e-6)
                    else torch.zeros((), device=self.device))
@@ -86,11 +86,11 @@ class SDVAEBoat(BaseGANBoat): # Stable Diffusion Variational Autoencoder Boat
         return {
             'g_loss': g_loss,
             'l_image': l_img.detach(),
+            'w_adv': torch.tensor(w_adv),
             'l_adv': l_adv.detach(),
+            'w_lpips': torch.tensor(w_lpips),
             'l_lpips': l_lpips.detach(),
             'l_kl': l_kl.detach(),
-            'w_lpips': torch.tensor(w_lpips),
-            'w_adv': torch.tensor(w_adv),
         }
 
     # ---------- Validation ----------
@@ -100,7 +100,7 @@ class SDVAEBoat(BaseGANBoat): # Stable Diffusion Variational Autoencoder Boat
 
         x = move_to_device(batch, self.device)['gt']
         with torch.no_grad():
-            x_hat, q = self.models['net'](x, mode='full', sample_method='mode')
+            x_hat, _, q, = self.models['net'](x, mode='full', sample_method='mode')
             x_hat = torch.clamp(x_hat, -1.0, 1.0)
 
             metrics = self._calc_metrics({'preds': x_hat, 'targets': x})

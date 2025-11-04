@@ -9,13 +9,12 @@ class VQGANBoat(BaseGANBoat): # VQVAE - GAN Boat
         hps  = config['boat'].get('hyperparameters', {})
 
         self.lambda_image       = float(hps.get('lambda_image', 1.0))
-        self.max_weight_lpips   = float(hps.get('max_weight_lpips', 1.0))
-        self.max_weight_adv     = float(hps.get('max_weight_adv', 1.0))
-        self.use_mode_eval      = bool(hps.get('use_mean_at_eval', True))
+        self.weight_q           = float(hps.get('weight_q', 0.25))
+        self.weight_lpips       = float(hps.get('weight_lpips', 0.5)) # foR vq + ae, THERE IS NO NEED OF FADE IN FOR lpips WEIGHT
+        self.max_weight_adv     = float(hps.get('max_weight_adv', 0.5)) 
         self.start_adv          = int(hps.get('start_adv', 20_000))
         
         # Annealers are optional; default to constant schedules
-        self.lpips_fadein = build_module(config['boat']['lpips_fadein']) if 'lpips_fadein' in config['boat'] else (lambda *_: 0.0)
         self.adv_fadein = build_module(config['boat']['adv_fadein']) if 'adv_fadein' in config['boat'] else (lambda *_: 0.0)
 
     # ---------- Inference ----------
@@ -41,7 +40,7 @@ class VQGANBoat(BaseGANBoat): # VQVAE - GAN Boat
 
             d_loss = self.losses['critic'](train_out)
 
-            w_adv = self.max_weight_adv * (1.0 - float(self.adv_fadein(self.global_step())))
+            w_adv = self.max_weight_adv * float(self.adv_fadein(self.global_step()))
 
             return {
                 'd_loss': d_loss * w_adv,
@@ -71,24 +70,23 @@ class VQGANBoat(BaseGANBoat): # VQVAE - GAN Boat
         else:
             l_adv = torch.zeros((), device=self.device)
 
-        w_lpips = self.max_weight_lpips * float(self.lpips_fadein(self.global_step()))
         w_adv = self.max_weight_adv * float(self.adv_fadein(self.global_step()))
 
         l_lpips = (self.losses['lpips_loss'](x_hat, x).mean()
-                   if ('lpips_loss' in self.losses and w_lpips > 1e-6)
+                   if ('lpips_loss' in self.losses and self.weight_lpips > 1e-6)
                    else torch.zeros((), device=self.device))
 
         unique_indices = torch.unique(indices)
         dict_usage = unique_indices / get_raw_module(self.models['net']).vocab_size
 
-        g_loss = self.lambda_image * l_img + w_adv * l_adv + w_lpips * l_lpips
+        g_loss = self.lambda_image * l_img + w_adv * l_adv + self.weight_lpips * l_lpips + self.weight_q * qloss
+
 
         return {
             'g_loss': g_loss,
             'l_image': l_img.detach(),
             'l_adv': l_adv.detach(),
             'l_lpips': l_lpips.detach(),
-            'w_lpips': torch.tensor(w_lpips),
             'w_adv': torch.tensor(w_adv),
             'l_vq': qloss,
             'dict_usage': dict_usage,

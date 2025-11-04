@@ -13,7 +13,7 @@ class AutoencoderBoat(BaseBoat):
         hps  = config['boat'].get('hyperparameters', {})
 
         self.lambda_image  = float(hps.get('lambda_image', 1.0))
-        self.max_w_lpips  = float(hps.get('max_w_lpips', 1.0))
+        self.max_weight_lpips  = float(hps.get('max_weight_lpips', 1.0))
 
         self.lpips_fadein = build_module(config['boat']['lpips_fadein'])
 
@@ -36,7 +36,7 @@ class AutoencoderBoat(BaseBoat):
         # Perceptual 
         l_lpips = torch.zeros((), device=self.device)
 
-        w_lpips = self.max_w_lpips * (1.0 - self.lpips_fadein(self.global_step()))
+        w_lpips = self.max_weight_lpips * (1.0 - self.lpips_fadein(self.global_step()))
 
         if w_lpips > 1e-6 and 'lpips_loss' in self.losses:
             lp = self.losses['lpips_loss'](x_hat, x)

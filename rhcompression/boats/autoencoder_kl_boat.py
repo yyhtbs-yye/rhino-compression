@@ -19,18 +19,17 @@ class AutoencoderKLBoat(BaseBoat):
     # ---------- Inference ----------
     def predict(self, x):
         sm = 'mode' if self.use_mode_eval else 'random'
-        x_hat, _ = self.models['net'](x, mode='full', sample_method=sm)
+        x_hat, _, _ = self.models['net'](x, mode='full', sample_method=sm)
         return torch.clamp(x_hat, -1.0, 1.0)
 
     # ---------- Train ----------
     def training_calc_losses(self, batch):
         x = move_to_device(batch, self.device)['gt']
-        x_hat, q = self.models['net'](x, mode='full', sample_method='random')
+        x_hat, z_feat, q = self.models['net'](x, mode='full', sample_method='random')
 
         l_img = self.losses['pixel_loss'](x_hat, x)
 
         w_lpips = self.max_weight_lpips * float(self.lpips_fadein(self.global_step()))
-        
         l_lpips = (self.losses['lpips_loss'](x_hat, x).mean()
                    if ('lpips_loss' in self.losses and w_lpips > 1e-6)
                    else torch.zeros((), device=self.device))
@@ -54,7 +53,7 @@ class AutoencoderKLBoat(BaseBoat):
 
         x = move_to_device(batch, self.device)['gt']
         with torch.no_grad():
-            x_hat, q = self.models['net'](x, mode='full', sample_method='mode')
+            x_hat, z_feat, q = self.models['net'](x, mode='full', sample_method='mode')
             x_hat = torch.clamp(x_hat, -1.0, 1.0)
 
             metrics = self._calc_metrics({'preds': x_hat, 'targets': x})

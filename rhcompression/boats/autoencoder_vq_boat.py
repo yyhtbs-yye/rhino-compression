@@ -9,10 +9,8 @@ class AutoencoderVQBoat(BaseBoat):
         hps  = config['boat'].get('hyperparameters', {})
 
         self.lambda_image   = float(hps.get('lambda_image', 1.0))
-        self.max_weight_lpips    = float(hps.get('max_weight_lpips', 1.0))
-
-        # Annealers are optional; default to constant schedules
-        self.lpips_fadein = build_module(config['boat']['lpips_fadein']) if 'lpips_fadein' in config['boat'] else (lambda *_: 0.0)
+        self.weight_q        = float(hps.get('weight_q', 0.5))
+        self.weight_lpips    = float(hps.get('weight_lpips', 0.5)) # foR vq + ae, THERE IS NO NEED OF FADE IN FOR lpips WEIGHT
 
     # ---------- Inference ----------
     def predict(self, x):
@@ -27,22 +25,20 @@ class AutoencoderVQBoat(BaseBoat):
 
         l_img = self.losses['pixel_loss'](x_hat, x)
 
-        w_lpips = self.max_weight_lpips * float(self.lpips_fadein(self.global_step()))
-
         l_lpips = (self.losses['lpips_loss'](x_hat, x).mean()
-                   if ('lpips_loss' in self.losses and w_lpips > 1e-6)
+                   if ('lpips_loss' in self.losses and self.weight_lpips > 1e-6)
                    else torch.zeros((), device=self.device))
         
         unique_indices = torch.unique(indices)
+
         dict_usage = unique_indices / get_raw_module(self.models['net']).vocab_size
 
-        total = self.lambda_image * l_img + w_lpips * l_lpips
+        total = self.lambda_image * l_img + self.weight_lpips * l_lpips + self.weight_q * qloss
 
         return {
             'total_loss': total,
             'l_image': l_img.detach(),
             'l_lpips': l_lpips.detach(),
-            'w_lpips': torch.tensor(w_lpips),
             'l_vq': qloss,
             'dict_usage': dict_usage,
         }
