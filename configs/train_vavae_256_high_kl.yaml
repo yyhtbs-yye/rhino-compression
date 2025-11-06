@@ -25,7 +25,7 @@ boat:
   # BaseGANBoat hyperparams
   hyperparameters:
     lambda_image: 1.0
-    beta_kl: 0.000001
+    beta_kl: 0.0001
     max_weight_lpips: 0.5
     weight_adv: 0.02
     start_adv: 20000
@@ -184,5 +184,5 @@ _vars:
   valid_folder_paths:
     gt: data/celeba/subsets/celeba_256
 
-  experiment_name: vavae_ffhq_256
+  experiment_name: vavae_ffhq_256_high_kl
   ema_start: 1000
