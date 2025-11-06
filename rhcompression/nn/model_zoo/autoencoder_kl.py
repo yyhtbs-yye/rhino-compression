@@ -12,6 +12,7 @@ class AutoencoderKL(nn.Module):
         self.quant_conv = torch.nn.Conv2d(2*ddconfig["z_channels"], 2*embed_dim, 1)
         self.post_quant_conv = torch.nn.Conv2d(embed_dim, ddconfig["z_channels"], 1)
         self.embed_dim = embed_dim
+        self.scaling_factor = 0.18215
 
     def encode(self, x):
         h = self.encoder(x)
