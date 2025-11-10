@@ -1,0 +1,128 @@
+_import: configs/train_base_config.yaml
+
+boat:
+  path: 'rhcompression.boats.msvae_boat'
+  name: 'MSVAEBoat'
+
+  lpips_fadein:
+    path: 'rhcore.crossovers.fadein'
+    name: 'SigmoidFadeIn'
+    params:
+      start_step: 3000
+      duration: 3000
+      step_size: 5
+      eps: 0.000001
+
+  adv_fadein:
+    path: 'rhcore.crossovers.fadein'
+    name: 'SigmoidFadeIn'
+    params:
+      start_step: 10000
+      duration: 20000
+      step_size: 10
+      eps: 0.000001
+
+  # BaseGANBoat hyperparams
+  hyperparameters:
+    lambda_image: 1.0
+    beta_kl: 0.0001
+    max_weight_lpips: 0.5
+    weight_adv: 0.02
+    start_adv: 20000
+    w_lpf: 0.5
+    w_ms: 0.5
+
+  models:
+    net:
+      path: 'rhcompression.nn.model_zoo.autoencoder_kl'
+      name: 'AutoencoderKL'
+      params: 
+        ddconfig:
+          double_z: True
+          z_channels: 16
+          resolution: 128
+          in_channels: 3
+          out_ch: 3
+          ch: 64
+          ch_mult: [1, 2, 4, 4]    # num_down = len(ch_mult) - 1  → 3 downsamples ⇒ 8× downsampling
+          num_res_blocks: 2
+          attn_resolutions: []      # no self-attn in the VAE
+          dropout: 0.0
+        embed_dim: 16
+
+    critic:
+      path: 'rhadversarial.nn.model_zoo.patch_discriminator'
+      name: 'PatchDiscriminator'
+      params:
+        in_channels: 3
+        spectral_norm_enabled: True
+
+  losses:
+    pixel_loss:
+      path: 'torch.nn'
+      name: 'MSELoss'
+      params: {}
+
+    lpips_loss:
+      path: 'lpips'
+      name: 'LPIPS'
+      params:
+        net: 'vgg'
+
+    critic:
+      path: 'rhino.nn.losses.gan_losses'
+      name: 'HingeGANLoss'
+      params: {}
+      wrapper: # This wrapper is more complex, as it needs parameters
+        mpath: 'rhcore.nn.losses.wrappers.list_of_keys.ListOfKeys'
+        params:
+          keys: ["real", "fake"] # targets is x, preds is params
+
+optimization:
+  target_loss_key: 'total_loss'
+  net:
+    path: 'torch.optim'
+    name: 'Adam'
+    params:
+      lr: 0.0001
+      betas: [0.0, 0.99]
+      weight_decay: 0.0
+    lr_scheduler: {}
+
+  critic:
+    path: 'torch.optim'
+    name: 'Adam'
+    params:
+      lr: 0.0005
+      betas: [0.0, 0.99]
+      weight_decay: 0.0
+    lr_scheduler: {}
+
+  use_ema:
+    ema_decay: 0.999
+    ema_start: $ema_start
+
+trainer:
+  devices: $devices
+  max_epochs: $max_epochs
+  val_check_epochs: 1
+  state_save_epochs: 1
+  fup_by_key: # Setup find unused parameters, this is particular useful for DDP. 
+    net: True
+
+_vars:
+  devices: [0, 1]
+  max_epochs: 200
+
+  train_batch_size: 64
+  valid_batch_size: 64
+  num_workers: 16
+
+  # point these to your datasets (normalized to [-1,1] in datamodule)
+  train_folder_paths:
+    gt: data/ffhq/ffhq_imgs/ffhq_128
+  valid_folder_paths:
+    gt: data/celeba/subsets/celeba_128
+
+  experiment_name: msvae_ffhq_128_high_kl
+  ema_start: 1000

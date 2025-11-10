@@ -2,7 +2,7 @@ import types
 from rhtrain.rhino_train import main
 
 args_dict = {
-    'config': 'configs/train_vavae_256.yaml',
+    'config': 'configs/train_infovae_256.yaml',
     'resume_from': None,
 }
 

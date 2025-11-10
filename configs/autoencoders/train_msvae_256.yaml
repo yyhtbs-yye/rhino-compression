@@ -1,8 +1,8 @@
-_import: configs/train_base_data.yaml
+_import: configs/train_base_config.yaml
 
 boat:
-  path: 'rhcompression.boats.vavae_boat'
-  name: 'VAVAEBoat'
+  path: 'rhcompression.boats.msvae_boat'
+  name: 'MSVAEBoat'
 
   lpips_fadein:
     path: 'rhcore.crossovers.fadein'
@@ -29,20 +29,8 @@ boat:
     max_weight_lpips: 0.5
     weight_adv: 0.02
     start_adv: 20000
-    vf_weight: 0.5
-    vf_margin_cos: 0.1
-    vf_margin_dms: 0.05
-    vf_eps: 0.00000001
-
-  pretrained:
-    vf:
-      path: 'rhcompression.wrappers.dinov3_wrapper'
-      name: 'Dinov3Wrapper'
-      params:
-        model_name: 'facebook/dinov3-vitb16-pretrain-lvd1689m'
-        input_range: [-1.0, 1.0]
-        enable_cache: true
-        mem_cache_in_gb: 16
+    w_lpf: 0.5
+    w_ms: 0.5
 
   models:
     net:
@@ -61,15 +49,6 @@ boat:
           attn_resolutions: []      # no self-attn in the VAE
           dropout: 0.0
         embed_dim: 32
-    
-    proj:
-      path: 'torch.nn'
-      name: 'Conv2d'
-      params:
-        in_channels: 32     # vavae new latent channels
-        out_channels: 768   # dinov3-vitb16 feature dim
-        kernel_size: 1
-        bias: True
 
     critic:
       path: 'rhadversarial.nn.model_zoo.patch_discriminator'
@@ -104,7 +83,6 @@ optimization:
   net:
     path: 'torch.optim'
     name: 'Adam'
-    bind_to: ['net', 'proj']
     params:
       lr: 0.0002
       betas: [0.0, 0.99]
@@ -132,44 +110,6 @@ trainer:
   fup_by_key: # Setup find unused parameters, this is particular useful for DDP. 
     net: True
 
-visualization:
-  save_images: true
-  first_batch_only: true
-  wnb: [0.5, 0.5]
-  num_vis_samples: 4
-
-validation:
-  target_metric_name: psnr
-  metrics:
-    psnr:
-      path: 'torchmetrics.image'
-      name: 'PeakSignalNoiseRatio'
-      wrapper: 'rhcore.metrics.wrappers.dict_2_params.Dict2ListParams'
-      params:
-        data_range: 2.0
-    ssim:
-      path: 'torchmetrics.image'
-      name: 'StructuralSimilarityIndexMeasure'
-      wrapper: 'rhcore.metrics.wrappers.dict_2_params.Dict2ListParams'
-      params: {}
-      
-logging:
-  root_dir: 'work_dirs'
-  name: $experiment_name
-  loggers:
-    tensorboard:
-      path: 'trainer.loggers.tensorboard'
-      name: 'TensorBoardLogger'
-      params:
-        log_dir: 'work_dirs'
-        name: $experiment_name
-
-callbacks:
-  - path: trainer.callbacks.state_cleaner
-    name: KeepTopKStateCallback
-    params:
-      top_k: 5
-
 _vars:
   devices: [0]
   max_epochs: 200
@@ -184,5 +124,5 @@ _vars:
   valid_folder_paths:
     gt: data/celeba/subsets/celeba_256
 
-  experiment_name: vavae_ffhq_256_high_kl
+  experiment_name: msvae_ffhq_256
   ema_start: 1000
