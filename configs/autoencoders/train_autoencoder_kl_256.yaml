@@ -5,7 +5,7 @@ boat:
   name: 'AutoencoderKLBoat'
 
   lpips_fadein:
-    path: 'rhcore.crossovers.fadein'
+    path: 'rhcore.weight_schedulers.fadein'
     name: 'SigmoidFadeIn'
     params:
       start_step: 3000

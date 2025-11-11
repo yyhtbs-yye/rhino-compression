@@ -4,24 +4,6 @@ boat:
   path: 'rhcompression.boats.msvae_boat'
   name: 'MSVAEBoat'
 
-  lpips_fadein:
-    path: 'rhcore.crossovers.fadein'
-    name: 'SigmoidFadeIn'
-    params:
-      start_step: 3000
-      duration: 3000
-      step_size: 5
-      eps: 0.000001
-
-  adv_fadein:
-    path: 'rhcore.crossovers.fadein'
-    name: 'SigmoidFadeIn'
-    params:
-      start_step: 10000
-      duration: 20000
-      step_size: 10
-      eps: 0.000001
-
   # BaseGANBoat hyperparams
   hyperparameters:
     lambda_image: 1.0
@@ -50,24 +32,46 @@ boat:
           dropout: 0.0
         embed_dim: 16
 
-    critic:
+    patch_critic:
       path: 'rhadversarial.nn.model_zoo.patch_discriminator'
       name: 'PatchDiscriminator'
       params:
         in_channels: 3
         spectral_norm_enabled: True
 
+    image_critic:
+        path: rhadversarial.nn.model_zoo.dcgan_discriminator
+        name: DCGANDiscriminator
+        params: 
+          input_scale: 128
+          output_scale: 4
+          out_channels: 4
+          norm_cfg: ~
+          spectral_norm_enabled: True
+
   losses:
     pixel_loss:
-      path: 'torch.nn'
-      name: 'MSELoss'
-      params: {}
-
-    lpips_loss:
-      path: 'lpips'
-      name: 'LPIPS'
+      path: rhcompression.nn.losses.base_loss_combiner
+      name: BaseLossCombiner
       params:
-        net: 'vgg'
+        image_loss:
+          path: 'torch.nn'
+          name: 'MSELoss'
+          params: {}
+          weight: 0.5
+        lpips_loss:
+          path: 'lpips'
+          name: 'LPIPS'
+          params:
+            net: 'vgg'
+          weight_scheduler:
+            path: 'rhcore.weight_schedulers.fadein'
+            name: 'SigmoidFadeIn'
+            params:
+              start_step: 3000
+              duration: 3000
+              step_size: 5
+              eps: 0.000001
 
     critic:
       path: 'rhino.nn.losses.gan_losses'
@@ -77,6 +81,14 @@ boat:
         mpath: 'rhcore.nn.losses.wrappers.list_of_keys.ListOfKeys'
         params:
           keys: ["real", "fake"] # targets is x, preds is params
+      weight_scheduler:
+        path: 'rhcore.weight_schedulers.fadein'
+        name: 'SigmoidFadeIn'
+        params:
+          start_step: 10000
+          duration: 20000
+          step_size: 10
+          eps: 0.000001
 
 optimization:
   target_loss_key: 'total_loss'
@@ -92,6 +104,7 @@ optimization:
   critic:
     path: 'torch.optim'
     name: 'Adam'
+    bind_to: ['critic', 'lg_critic']
     params:
       lr: 0.0005
       betas: [0.0, 0.99]
@@ -112,7 +125,7 @@ trainer:
 
 _vars:
   devices: [0, 1]
-  max_epochs: 200
+  max_epochs: 500
 
   train_batch_size: 64
   valid_batch_size: 64

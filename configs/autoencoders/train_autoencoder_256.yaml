@@ -5,7 +5,7 @@ boat:
   name: 'AutoencoderBoat'
 
   lpips_fadein:
-    path: 'rhcore.crossovers.fadein'
+    path: 'rhcore.weight_schedulers.fadein'
     name: 'ExpWeightAnnealer'
     params:
       start_step: 30

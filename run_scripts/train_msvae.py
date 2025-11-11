@@ -3,7 +3,7 @@ from rhtrain.rhino_train import main
 
 args_dict = {
     'config': 'configs/autoencoders/train_msvae_128_high_kl.yaml',
-    'resume_from': 'work_dirs/msvae_ffhq_128_high_kl/run_17/last.pt',
+    'resume_from': None
 }
 
 args = types.SimpleNamespace(**args_dict)

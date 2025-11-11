@@ -16,65 +16,10 @@ class MSVAEBoat(SDVAEBoat):
         # VA-VAE specifics
         self.w_lpf     = float(hps.get('w_lpf', 0.5))       # whyper in the paper
         self.w_ms      = float(hps.get('w_ms', 0.5))       # whyper in the paper
-        self.f_lpf     = float(hps.get('f_lpf', 0.5))
-        self.f_hpf     = float(hps.get('f_hpf', 0.5))
+        self.weight_adv_patch = float(hps.get('w_adv_patch', 0.8))
 
         self.models['dist_ema'] = StateEMA()
 
-    def _lowpass_loss(self, x_hat, x, mag):
-        """
-        x_hat, x: (B, C, H, W)
-        mag: float or tensor of shape (B,), each sample its own cutoff.
-        """
-        assert x_hat.shape == x.shape, "x_hat and x must have the same shape"
-        B, C, H, W = x.shape
-
-        # mag to tensor of shape (B,)
-        if isinstance(mag, (float, int)):
-            mag = torch.full((B,), float(mag), device=x.device, dtype=x.dtype)
-        else:
-            mag = torch.as_tensor(mag, device=x.device, dtype=x.dtype)
-            assert mag.shape[0] == B, "mag must have length B"
-
-        # clamp to (0, 1]
-        mag = mag.clamp(1e-3, 1.0)
-
-        # FFT over spatial dims
-        X_hat = torch.fft.fftn(x_hat, dim=(-2, -1))
-        X     = torch.fft.fftn(x,     dim=(-2, -1))
-
-        # radius map (H, W)
-        yy = torch.arange(H, device=x.device) - H // 2
-        xx = torch.arange(W, device=x.device) - W // 2
-        yy, xx = torch.meshgrid(yy, xx, indexing="ij")
-        radius = torch.sqrt(yy**2 + xx**2)              # (H, W)
-
-        r_max = radius.max()
-        radius = radius.view(1, 1, H, W)                # (1, 1, H, W)
-
-        # per-sample cutoff: (B, 1, 1, 1)
-        cutoff = (mag.view(B, 1, 1, 1) * r_max)
-
-        # broadcast to (B, 1, H, W)
-        mask = (radius <= cutoff).float()               # (B, 1, H, W)
-
-        # shift mask to match unshifted FFT layout
-        mask = torch.fft.ifftshift(mask, dim=(-2, -1))
-
-        # apply low-pass filter
-        X_hat_lp = X_hat * mask
-        X_lp     = X     * mask
-
-        # back to spatial domain (take real part)
-        x_hat_lp = torch.fft.ifftn(X_hat_lp, dim=(-2, -1)).real
-        x_lp     = torch.fft.ifftn(X_lp,     dim=(-2, -1)).real
-
-        # MSE in low-frequency space
-        loss = F.mse_loss(x_hat_lp, x_lp)
-
-        return loss
-
-    # -------- D step wiring (real vs recon) --------
     def d_step_calc_losses(self, batch):
 
         if self.global_step() >= self.start_adv:
@@ -85,12 +30,19 @@ class MSVAEBoat(SDVAEBoat):
             with torch.no_grad():
                 output = self.models['net'](x, mode='full') 
 
-            d_real = self.models['critic'](x)
-            d_fake = self.models['critic'](output['x_sample_sg'].detach())
+            d_real_patch = self.models['patch_critic'](x)
+            d_fake_patch = self.models['patch_critic'](output['x_sample_sg'].detach())
+            d_loss_patch = self.losses['patch_critic'](
+                {'real': d_real_patch, 'fake': d_fake_patch, **batch}
+            )
 
-            train_out = {'real': d_real, 'fake': d_fake, **batch}
+            d_real_image = self.models['image_critic'](x)
+            d_fake_image = self.models['image_critic'](output['x_sample_sg'].detach())
+            d_loss_image = self.losses['critic'](
+                {'real': d_real_image, 'fake': d_fake_image, **batch}
+            )
 
-            d_loss = self.losses['critic'](train_out)
+            d_loss = self.weight_adv_patch * d_loss_patch + (1 - self.weight_adv_patch) * d_loss_image
 
             w_adv = self.max_weight_adv * float(self.adv_fadein(self.global_step()))
 
@@ -111,10 +63,13 @@ class MSVAEBoat(SDVAEBoat):
 
         w_adv = self.max_weight_adv * float(self.adv_fadein(self.global_step()))
 
+        # Adversarial Loss
         if self.global_step() >= self.start_adv:
-            d_fake_for_g = self.models['critic'](output['x_sample_sg'])
-            train_out = {'real': d_fake_for_g, 'fake': None, **batch}
-            l_adv = self.losses['critic'](train_out)
+            g_real_patch = self.models['patch_critic'](output['x_sample_sg'])
+            l_adv_patch = self.losses['critic']({'real': g_real_patch, 'fake': None, **batch})
+            g_real_image = self.models['image_critic'](output['x_sample_sg'])
+            l_adv_image = self.losses['critic']({'real': g_real_image, 'fake': None, **batch})
+            l_adv = self.weight_adv_patch * l_adv_patch + (1 - self.weight_adv_patch) * l_adv_image
         else:
             l_adv = torch.zeros((), device=self.device)
 
