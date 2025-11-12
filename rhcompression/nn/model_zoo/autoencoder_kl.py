@@ -48,13 +48,17 @@ class AutoencoderKL(nn.Module):
             z_mean = posterior.mode()
             z_sample, e_sample = posterior.sample()
             x_mean = self.decode(z_mean)
+            x_mean_sg = self.decode((z_mean).detach())
+
             if noise_weight is None:
                 x_sample = self.decode(z_sample)
                 x_sample_sg = self.decode(z_sample.detach())
             else:
                 x_sample = self.decode(z_sample)
                 x_sample_sg = self.decode((z_mean + e_sample * noise_weight).detach())
+            
             return {'x_mean': x_mean, 
+                    'x_mean_sg': x_mean_sg, 
                     'x_sample': x_sample, 
                     'x_sample_sg': x_sample_sg, 
                     'z_mean': z_mean, 

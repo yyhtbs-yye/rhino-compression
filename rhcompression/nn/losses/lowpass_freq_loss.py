@@ -28,6 +28,7 @@ class CutoffControlled(nn.Module):
 
         if (H, W) in self.radius_cache:
             radius = self.radius_cache[(H, W)]
+            r_max = radius.max()
         else:
             # radius map (H, W)
             yy = torch.arange(H, device=label.device) - H // 2

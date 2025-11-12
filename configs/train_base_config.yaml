@@ -7,7 +7,7 @@ data:
         path: 'rhcore.data.datasets.basic_image_dataset'
         name: 'BasicImageDataset'
         params: 
-          # max_dataset_size: 256
+          # max_dataset_size: 1024
           folder_paths: $train_folder_paths
           data_prefix:
             gt: ''

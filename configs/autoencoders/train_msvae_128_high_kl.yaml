@@ -8,11 +8,6 @@ boat:
   hyperparameters:
     lambda_image: 1.0
     beta_kl: 0.0001
-    max_weight_lpips: 0.5
-    weight_adv: 0.02
-    start_adv: 20000
-    w_lpf: 0.5
-    w_ms: 0.5
 
   models:
     net:
@@ -51,27 +46,31 @@ boat:
 
   losses:
     pixel_loss:
-      path: rhcompression.nn.losses.base_loss_combiner
-      name: BaseLossCombiner
-      params:
-        image_loss:
-          path: 'torch.nn'
-          name: 'MSELoss'
-          params: {}
-          weight: 0.5
-        lpips_loss:
-          path: 'lpips'
-          name: 'LPIPS'
-          params:
-            net: 'vgg'
-          weight_scheduler:
-            path: 'rhcore.weight_schedulers.fadein'
-            name: 'SigmoidFadeIn'
-            params:
-              start_step: 3000
-              duration: 3000
-              step_size: 5
-              eps: 0.000001
+      path: 'torch.nn'
+      name: 'MSELoss'
+      params: {}
+      weight: 0.5
+
+    # lpips_loss:
+    #   path: 'lpips'
+    #   name: 'LPIPS'
+    #   params:
+    #     net: 'vgg'
+    #   weight_scheduler:
+    #     path: 'rhcore.weight_schedulers.fadein'
+    #     name: 'SigmoidFadeIn'
+    #     params:
+    #       max_weight: 0.5
+    #       start_step: 3000
+    #       duration: 3000
+    #       step_size: 5
+    #       eps: 0.000001
+
+    lpf_loss:
+      path: 'rhcompression.nn.losses.lowpass_freq_loss'
+      name: 'CutoffControlled'
+      params: {}
+      weight: 0.5
 
     critic:
       path: 'rhino.nn.losses.gan_losses'
@@ -85,8 +84,9 @@ boat:
         path: 'rhcore.weight_schedulers.fadein'
         name: 'SigmoidFadeIn'
         params:
+          max_weight: 0.002
           start_step: 10000
-          duration: 20000
+          duration: 30000
           step_size: 10
           eps: 0.000001
 
@@ -104,9 +104,9 @@ optimization:
   critic:
     path: 'torch.optim'
     name: 'Adam'
-    bind_to: ['critic', 'lg_critic']
+    bind_to: ['patch_critic', 'image_critic']
     params:
-      lr: 0.0005
+      lr: 0.0002
       betas: [0.0, 0.99]
       weight_decay: 0.0
     lr_scheduler: {}
@@ -124,11 +124,11 @@ trainer:
     net: True
 
 _vars:
-  devices: [0, 1]
+  devices: [0, 1, 2, 3]
   max_epochs: 500
 
   train_batch_size: 64
-  valid_batch_size: 64
+  valid_batch_size: 16
   num_workers: 16
 
   # point these to your datasets (normalized to [-1,1] in datamodule)

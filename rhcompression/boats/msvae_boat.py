@@ -3,50 +3,44 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from rhcompression.boats.sdvae_boat import SDVAEBoat
-from rhcompression.boats.helpers.state_ema import StateEMA
-from rhtrain.utils.ddp_utils import move_to_device
+
+EPS = 1e-6
 
 # MeanStay VAE (Mainstay VAE/AnchorVAE)
 class MSVAEBoat(SDVAEBoat):
     def __init__(self, config=None):
         super().__init__(config=config or {})
+
         cfg = config or {}
         hps = cfg.get("boat", {}).get("hyperparameters", {})
-
-        # VA-VAE specifics
-        self.w_lpf     = float(hps.get('w_lpf', 0.5))       # whyper in the paper
-        self.w_ms      = float(hps.get('w_ms', 0.5))       # whyper in the paper
-        self.weight_adv_patch = float(hps.get('w_adv_patch', 0.8))
-
-        self.models['dist_ema'] = StateEMA()
+        self.weight_adv_patch = float(hps.get('weight_adv_patch', 0.8))
 
     def d_step_calc_losses(self, batch):
 
-        if self.global_step() >= self.start_adv:
+        critic_weight = self.weight_schedulers['critic'](self.global_step())
 
-            batch = move_to_device(batch, self.device)
+        if critic_weight > EPS:
+
             x = batch['gt']
 
             with torch.no_grad():
-                output = self.models['net'](x, mode='full') 
+                out = self.models['net'](x, mode='full') 
 
             d_real_patch = self.models['patch_critic'](x)
-            d_fake_patch = self.models['patch_critic'](output['x_sample_sg'].detach())
-            d_loss_patch = self.losses['patch_critic'](
+            d_fake_patch = self.models['patch_critic'](out['x_sample_sg'].detach())
+            d_loss_patch = self.losses['critic'](
                 {'real': d_real_patch, 'fake': d_fake_patch, **batch}
             )
 
             d_real_image = self.models['image_critic'](x)
-            d_fake_image = self.models['image_critic'](output['x_sample_sg'].detach())
+            d_fake_image = self.models['image_critic'](out['x_sample_sg'].detach())
             d_loss_image = self.losses['critic'](
                 {'real': d_real_image, 'fake': d_fake_image, **batch}
             )
 
             d_loss = self.weight_adv_patch * d_loss_patch + (1 - self.weight_adv_patch) * d_loss_image
 
-            w_adv = self.max_weight_adv * float(self.adv_fadein(self.global_step()))
-
-            return {'d_loss': d_loss * w_adv}
+            return {'d_loss': critic_weight * d_loss}
         else:
             return {'d_loss': torch.zeros((), device=self.device)}
 
@@ -55,47 +49,43 @@ class MSVAEBoat(SDVAEBoat):
 
         x = batch['gt']
 
-        output = self.models['net'](x, mode='full')
+        out = self.models['net'](x, mode='full')
+
+        results = {}
         
-        l_ms = self.losses['pixel_loss'](output['x_mean'], x)
+        # PixelLoss only affects KL on Mean
+        results['w_pixel'] = self.weight_schedulers['pixel_loss'](self.global_step())
+        results['l_pixel'] = self.losses['pixel_loss'](out['x_mean'], x)
+        
+        # # LPIPS does not affect KL at all
+        # results['w_lpips'] = self.weight_schedulers['lpips_loss'](self.global_step())
+        # results['l_lpips'] = self.losses['lpips_loss'](out['x_mean_sg'], x).sum() + self.losses['lpips_loss'](out['x_sample_sg'], x).sum()
 
-        l_lpf = self._lowpass_loss(output['x_sample'], x, mag=0.75)
+        # LPFLoss affects KL on Mean and Variance
+        results['w_lpf'] = self.weight_schedulers['lpf_loss'](self.global_step())
+        results['l_lpf'] = self.losses['lpf_loss'](out['x_sample'], x, 0.75 * torch.ones(x.size(0), device=x.device, dtype=x.dtype))
 
-        w_adv = self.max_weight_adv * float(self.adv_fadein(self.global_step()))
+        results['w_adv'] = self.weight_schedulers['critic'](self.global_step())
 
         # Adversarial Loss
-        if self.global_step() >= self.start_adv:
-            g_real_patch = self.models['patch_critic'](output['x_sample_sg'])
+        if results['w_adv'] > EPS:
+            g_real_patch = self.models['patch_critic'](out['x_sample_sg'])
             l_adv_patch = self.losses['critic']({'real': g_real_patch, 'fake': None, **batch})
-            g_real_image = self.models['image_critic'](output['x_sample_sg'])
+            g_real_image = self.models['image_critic'](out['x_sample_sg'])
             l_adv_image = self.losses['critic']({'real': g_real_image, 'fake': None, **batch})
-            l_adv = self.weight_adv_patch * l_adv_patch + (1 - self.weight_adv_patch) * l_adv_image
+            results['l_adv'] = self.weight_adv_patch * l_adv_patch + (1 - self.weight_adv_patch) * l_adv_image
         else:
-            l_adv = torch.zeros((), device=self.device)
+            results['l_adv'] = torch.zeros((), device=self.device)
 
-        w_lpips = self.max_weight_lpips * float(self.lpips_fadein(self.global_step()))
-        l_lpips = (self.losses['lpips_loss'](output['x_mean'], x).mean() * 0.5
-                   if ('lpips_loss' in self.losses and w_lpips > 1e-6)
-                   else torch.zeros((), device=self.device))
+        results['l_kl'] = out['q'].kl().mean()
 
-        l_kl = output['q'].kl().mean()
-
-        g_loss = (
-            self.w_ms * l_ms 
-            + w_adv * l_adv 
-            + w_lpips * l_lpips 
-            + self.beta_kl * l_kl
-            + l_lpf * self.w_lpf
+        results['g_loss'] = (
+            results['w_pixel'] * results['l_pixel'] 
+            # + results['w_lpips'] * results['l_lpips'] 
+            + results['w_lpf'] * results['l_lpf'] 
+            + results['w_adv'] * results['l_adv'] 
+            + self.beta_kl * results['l_kl']
         )
 
-        return {
-            'g_loss': g_loss,
-            'w_adv': torch.tensor(w_adv),
-            'l_adv': l_adv.detach(),
-            'w_lpips': torch.tensor(w_lpips),
-            'l_lpips': l_lpips.detach(),
-            'l_kl': l_kl.detach(),
-            'l_ms': l_ms.detach(),
-            'l_lpf': l_lpf.detach(),
-        }
+        return {k: v if k == 'g_loss' else torch.tensor(v).detach() for k, v in results.items()}
 
