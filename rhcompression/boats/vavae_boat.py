@@ -68,31 +68,29 @@ class VAVAEBoat(SDVAEBoat):
 
         losses = super().g_step_calc_losses(batch)
 
-        z_mean = batch['z_mean']
         x = batch['gt']
+
+        results = {}
 
         # VF features (frozen)
         with torch.no_grad():
             f_feats = self.pretrained['vf'].get_features(x, batch['gt_path'])
 
         # VA-VAE raw terms
-        l_mcos, l_mdms = self._vf_losses(z_mean, f_feats)
-        l_vf = l_mcos + l_mdms
+        results['l_mcos'], results['l_mdms'] = self._vf_losses(self.out['z_mean'], f_feats)
+        results['l_vf'] = results['l_mcos'] + results['l_mdms']
 
         g_loss = losses.pop('g_loss')
 
-        w_adapt = self._adaptive_weight(z_mean, g_loss, l_vf)
+        results['w_adapt'] = self._adaptive_weight(self.out['z_mean'], g_loss, results['l_vf'])
 
-        g_loss = (
+        results['l_vf'] = results['l_vf'] * results['w_adapt']
+        
+        results['g_loss'] = (
             g_loss 
-            + l_vf * self.vf_weight * w_adapt
+            + results['l_vf'] * self.vf_weight
         )
 
-        return {
-            'g_loss': g_loss,
-            **losses,
-            'l_mcos': l_mcos.detach(),
-            'l_mdms': l_mdms.detach(),
-            'l_vf': l_vf.detach(),
-            'w_vf_adapt': w_adapt.detach(),
-        }
+        self.out = None
+
+        return {k: v if k == 'g_loss' else torch.tensor(v).detach() for k, v in results.items()}

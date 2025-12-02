@@ -1,22 +1,13 @@
 import torch
 from rhtrain.utils.ddp_utils import move_to_device
 from rhadversarial.boats.base_gan_boat import BaseGANBoat
-from rhcore.utils.build_components import build_module
+EPS = 1e-9
 
 class SDVAEBoat(BaseGANBoat): # Stable Diffusion Variational Autoencoder Boat
     def __init__(self, config=None):
         super().__init__(config=config or {})
         hps  = config['boat'].get('hyperparameters', {})
-
-        self.lambda_image       = float(hps.get('lambda_image', 1.0))
         self.beta_kl            = float(hps.get('beta_kl', 1e-6))
-        self.max_weight_lpips   = float(hps.get('max_weight_lpips', 1.0))
-        self.max_weight_adv     = float(hps.get('max_weight_adv', 1.0))
-        self.start_adv          = int(hps.get('start_adv', 20_000))
-
-        # Annealers are optional; default to constant schedules
-        self.lpips_fadein = build_module(config['boat']['lpips_fadein']) if 'lpips_fadein' in config['boat'] else (lambda *_: 0.0)
-        self.adv_fadein = build_module(config['boat']['adv_fadein']) if 'adv_fadein' in config['boat'] else (lambda *_: 0.0)
 
     # ---------- Inference ----------
     def predict(self, x):
@@ -26,9 +17,10 @@ class SDVAEBoat(BaseGANBoat): # Stable Diffusion Variational Autoencoder Boat
     # -------- D step wiring (real vs recon) --------
     def d_step_calc_losses(self, batch):
 
-        if self.global_step() >= self.start_adv:
+        critic_weight = self.loss_weight_schedulers['critic'](self.global_step())
 
-            batch = move_to_device(batch, self.device)
+        if critic_weight > EPS:
+
             x = batch['gt']
 
             with torch.no_grad():
@@ -39,65 +31,58 @@ class SDVAEBoat(BaseGANBoat): # Stable Diffusion Variational Autoencoder Boat
 
             train_out = {'real': d_real, 'fake': d_fake, **batch}
 
+            m0 = d_real.mean().detach() - d_fake.mean().detach()
+
             d_loss = self.losses['critic'](train_out)
 
-            w_adv = self.max_weight_adv * float(self.adv_fadein(self.global_step()))
+            w_adv = critic_weight * d_loss
 
             return {
                 'd_loss': d_loss * w_adv,
-                'd_real': d_real.mean().detach(),
-                'd_fake': d_fake.mean().detach(),
+                'd_loss_raw': d_loss.detach(),
+                'm0_patch': m0.detach(),
+
             }
         else:
             return {'d_loss': torch.zeros((), device=self.device),
-                    'd_real': torch.zeros((), device=self.device),
-                    'd_fake': torch.zeros((), device=self.device)}
+                    'd_loss_raw': torch.zeros((), device=self.device),
+                    'm0_patch': torch.zeros((), device=self.device)}
 
     # ---------- Train ----------
     def g_step_calc_losses(self, batch):
 
         x = batch['gt']
         
-        output = self.models['net'](x, mode='full')
+        out = self.models['net'](x, mode='full')
 
-        l_image = self.losses['pixel_loss'](output['x_sample'], x)
+        self.out = out
 
-        w_adv = self.max_weight_adv * float(self.adv_fadein(self.global_step()))
-        if self.global_step() >= self.start_adv:
-            d_fake_for_g = self.models['critic'](output['x_mean'])
-            train_out = {'real': d_fake_for_g, 'fake': None, **batch}
-            l_adv = self.losses['critic'](train_out)
+        results = {}
+
+        results['w_pixel'] = self.loss_weight_schedulers['pixel_loss'](self.global_step())
+        results['l_pixel'] = self.losses['pixel_loss'](out['x_sample'], x)
+
+        results['w_lpips'] = self.loss_weight_schedulers['lpips_loss'](self.global_step())
+        results['l_lpips'] = self.losses['lpips_loss'](out['x_sample'], x)
+
+        # Adversarial Loss
+        results['w_adv'] = self.loss_weight_schedulers['critic'](self.global_step())
+        if results['w_adv'] > EPS:
+            g_real = self.models['critic'](out['x_sample'])
+            results['l_adv'] = self.losses['critic']({'real': g_real, 'fake': None, **batch})
         else:
-            l_adv = torch.zeros((), device=self.device)
+            results['l_adv'] = torch.zeros((), device=self.device)
 
-        w_lpips = self.max_weight_lpips * float(self.lpips_fadein(self.global_step()))
-        l_lpips = (self.losses['lpips_loss'](output['x_mean'], x).mean()
-                   if ('lpips_loss' in self.losses and w_lpips > 1e-6)
-                   else torch.zeros((), device=self.device))
+        results['l_kl'] = out['q'].kl().mean()
 
-        l_kl = output['q'].kl().mean()
-
-        g_loss = (
-            self.lambda_image * l_image 
-            + w_adv * l_adv 
-            + w_lpips * l_lpips 
-            + self.beta_kl * l_kl
+        results['g_loss'] = (
+            results['w_pixel'] * results['l_pixel'] 
+            + results['w_lpips'] * results['l_lpips'] 
+            + results['w_adv'] * results['l_adv'] 
+            + self.beta_kl * results['l_kl']
         )
 
-        batch['z_sample'] = output['z_sample']
-        batch['x_sample'] = output['x_sample']
-        batch['z_mean'] = output['z_mean']
-        batch['x_mean'] = output['x_mean']
-        
-        return {
-            'g_loss': g_loss,
-            'l_image': l_image.detach(),
-            'w_adv': torch.tensor(w_adv),
-            'l_adv': l_adv.detach(),
-            'w_lpips': torch.tensor(w_lpips),
-            'l_lpips': l_lpips.detach(),
-            'l_kl': l_kl.detach(),
-        }
+        return {k: v if k == 'g_loss' else torch.tensor(v).detach() for k, v in results.items()}
 
     # ---------- Validation ----------
     def validation_step(self, batch, batch_idx, epoch):

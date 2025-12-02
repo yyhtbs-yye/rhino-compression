@@ -7,44 +7,38 @@ class AutoencoderKLBoat(BaseBoat):
     def __init__(self, config=None):
         super().__init__(config=config or {})
         hps  = config['boat'].get('hyperparameters', {})
-
-        self.lambda_image   = float(hps.get('lambda_image', 1.0))
         self.beta_kl        = float(hps.get('beta_kl', hps.get('lambda_kl', 1e-6)))
-        self.max_weight_lpips    = float(hps.get('max_weight_lpips', 1.0))
-        self.use_mode_eval  = bool(hps.get('use_mean_at_eval', True))
 
         # Annealers are optional; default to constant schedules
         self.lpips_fadein = build_module(config['boat']['lpips_fadein']) if 'lpips_fadein' in config['boat'] else (lambda *_: 0.0)
 
     # ---------- Inference ----------
     def predict(self, x):
-        sm = 'mode' if self.use_mode_eval else 'random'
-        x_hat, _, _ = self.models['net'](x, mode='full', sample_method=sm)
-        return torch.clamp(x_hat, -1.0, 1.0)
+        output = self.models['net'](x, mode='full')
+        return torch.clamp(output['x_mean'], -1.0, 1.0), torch.clamp(output['x_sample'], -1.0, 1.0)
 
     # ---------- Train ----------
     def training_calc_losses(self, batch):
-        x = move_to_device(batch, self.device)['gt']
-        x_hat, z_feat, q = self.models['net'](x, mode='full', sample_method='random')
+        x = batch['gt']
+        out = self.models['net'](x, mode='full', sample_method='random')
 
-        l_img = self.losses['pixel_loss'](x_hat, x)
+        results = {}
 
-        w_lpips = self.max_weight_lpips * float(self.lpips_fadein(self.global_step()))
-        l_lpips = (self.losses['lpips_loss'](x_hat, x).mean()
-                   if ('lpips_loss' in self.losses and w_lpips > 1e-6)
-                   else torch.zeros((), device=self.device))
+        results['w_pixel'] = self.loss_weight_schedulers['pixel_loss'](self.global_step())
+        results['l_pixel'] = self.losses['pixel_loss'](out['x_sample'], x)
 
-        l_kl = (q.kl().mean() if hasattr(q, 'kl') else torch.zeros((), device=self.device))
+        results['w_lpips'] = self.loss_weight_schedulers['lpips_loss'](self.global_step())
+        results['l_lpips'] = self.losses['lpips_loss'](out['x_sample'], x)
 
-        total = self.lambda_image * l_img + w_lpips * l_lpips + self.beta_kl * l_kl
+        results['l_kl'] = out['q'].kl().mean()
 
-        return {
-            'total_loss': total,
-            'l_image': l_img.detach(),
-            'l_lpips': l_lpips.detach(),
-            'l_kl': l_kl.detach(),
-            'w_lpips': torch.tensor(w_lpips),
-        }
+        results['total_loss'] = (
+            results['w_pixel'] * results['l_pixel'] 
+            + results['w_lpips'] * results['l_lpips'] 
+            + self.beta_kl * results['l_kl']
+        )
+
+        return {k: v if k == 'total_loss' else torch.tensor(v).detach() for k, v in results.items()}
 
     # ---------- Validation ----------
     def validation_step(self, batch, batch_idx, epoch):
@@ -53,11 +47,12 @@ class AutoencoderKLBoat(BaseBoat):
 
         x = move_to_device(batch, self.device)['gt']
         with torch.no_grad():
-            x_hat, z_feat, q = self.models['net'](x, mode='full', sample_method='mode')
-            x_hat = torch.clamp(x_hat, -1.0, 1.0)
+            output = self.models['net'](x, mode='full')
+            x_mean = torch.clamp(output['x_mean'], -1.0, 1.0)
+            x_sample = torch.clamp(output['x_sample'], -1.0, 1.0)
 
-            metrics = self._calc_metrics({'preds': x_hat, 'targets': x})
-            metrics['l_kl'] = (q.kl().mean() if hasattr(q, 'kl') else torch.zeros((), device=self.device))
-            named_images = {'gt': x, 'recon': x_hat}
+            metrics = self._calc_metrics({'preds': x_mean, 'targets': x})
+            metrics['l_kl'] = output['q'].kl().mean()
+            named_images = {'gt': x, 'recon': x_mean, 'rand_preds': x_sample}
 
         return metrics, named_images

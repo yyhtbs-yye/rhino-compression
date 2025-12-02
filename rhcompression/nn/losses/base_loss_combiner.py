@@ -13,18 +13,18 @@ class BaseLossCombiner(nn.Module):
         assert isinstance(named_configs_copy, dict), 'the arg ``named_configs_copy`` must be a dictionary'
 
         self.losses = nn.ModuleDict()
-        self.weight_schedulers = {}
+        self.loss_weight_schedulers = {}
 
         for name in named_configs_copy:
             config = named_configs_copy[name]
 
             if 'weight' in config:
                 w = config.pop('weight')
-                self.weight_schedulers[name] = lambda _step: w
+                self.loss_weight_schedulers[name] = lambda _step: w
             elif 'weight_scheduler' in config:
-                self.weight_schedulers[name] = build_module(config.pop('weight_scheduler'))
+                self.loss_weight_schedulers[name] = build_module(config.pop('weight_scheduler'))
             else:
-                self.weight_schedulers[name] = lambda _step: 1.0
+                self.loss_weight_schedulers[name] = lambda _step: 1.0
 
             self.losses[name] = build_module(config)
 
@@ -34,8 +34,8 @@ class BaseLossCombiner(nn.Module):
         
         for name in self.losses:
             if total_loss is None:
-                total_loss = self.weight_schedulers[name](step) * self.losses[name](hat, label)
+                total_loss = self.loss_weight_schedulers[name](step) * self.losses[name](hat, label)
             else:
-                total_loss += self.weight_schedulers[name](step) * self.losses[name](hat, label)
+                total_loss += self.loss_weight_schedulers[name](step) * self.losses[name](hat, label)
 
         return total_loss

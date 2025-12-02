@@ -4,10 +4,10 @@ boat:
   path: 'rhcompression.boats.msvae_boat'
   name: 'MSVAEBoat'
 
-  # BaseGANBoat hyperparams
   hyperparameters:
-    lambda_image: 1.0
-    beta_kl: 0.0001
+    beta_kl: 0.001
+    weight_adv_patch: 0.5
+    cut_freq: 0.33
 
   models:
     net:
@@ -28,21 +28,20 @@ boat:
         embed_dim: 16
 
     patch_critic:
-      path: 'rhadversarial.nn.model_zoo.patch_discriminator'
-      name: 'PatchDiscriminator'
+      path: 'rhadversarial.nn.model_zoo.patchgan.patchgan_discriminator'
+      name: 'Discriminator'
       params:
         in_channels: 3
         spectral_norm_enabled: True
 
     image_critic:
-        path: rhadversarial.nn.model_zoo.dcgan_discriminator
-        name: DCGANDiscriminator
+        path: rhadversarial.nn.model_gpt.resgan.resgan_discriminator
+        name: Discriminator
         params: 
           input_scale: 128
+          base_channels: 32
           output_scale: 4
-          out_channels: 4
-          norm_cfg: ~
-          spectral_norm_enabled: True
+          attn_at: [8]
 
   losses:
     pixel_loss:
@@ -50,21 +49,6 @@ boat:
       name: 'MSELoss'
       params: {}
       weight: 0.5
-
-    # lpips_loss:
-    #   path: 'lpips'
-    #   name: 'LPIPS'
-    #   params:
-    #     net: 'vgg'
-    #   weight_scheduler:
-    #     path: 'rhcore.weight_schedulers.fadein'
-    #     name: 'SigmoidFadeIn'
-    #     params:
-    #       max_weight: 0.5
-    #       start_step: 3000
-    #       duration: 3000
-    #       step_size: 5
-    #       eps: 0.000001
 
     lpf_loss:
       path: 'rhcompression.nn.losses.lowpass_freq_loss'
@@ -81,14 +65,14 @@ boat:
         params:
           keys: ["real", "fake"] # targets is x, preds is params
       weight_scheduler:
-        path: 'rhcore.weight_schedulers.fadein'
+        path: 'rhcore.loss_weight_schedulers.fadein'
         name: 'SigmoidFadeIn'
         params:
           max_weight: 0.002
-          start_step: 10000
-          duration: 30000
-          step_size: 10
-          eps: 0.000001
+          start_step: 0
+          duration: 20000
+          step_size: 5
+          eps: 0.000000001
 
 optimization:
   target_loss_key: 'total_loss'
@@ -124,7 +108,7 @@ trainer:
     net: True
 
 _vars:
-  devices: [0, 1, 2, 3]
+  devices: [2, 3, 4, 5]
   max_epochs: 500
 
   train_batch_size: 64
